@@ -1,5 +1,6 @@
 /* Copyright 2004-2013 Roger P. Woods, M.D. */
 /* Modified: 7/4/13 */
+/* Comments only edited 9/21/14 */
 
 /*
  * subroutine for ICA minimization with sub-Gaussian, super-Gaussian and Gaussian sources
@@ -32,7 +33,7 @@
  *		[7] 	WORK is a pointer to a double array of length M
  *		[9] 	SUBGC is the number of sub-Gaussian components
  *		[10] 	SUPERGC is the number super-Gaussian components
- *		[11] 	GC is the number of Gaussian components
+ *		[11]	*logdeterminant (input value ignored)
  *		[14] 	QR_MATRIX is an M by M double matrix
  *		[15] 	QRAUX and E is a double vector of length M
  *		[16] 	NULL_MATRIX_COLUMN and D is a double vector of length N  ****previously length M****
@@ -44,7 +45,7 @@
  *		the negative log likelihood is returned
  *		dW contains pointers to dW_TEMP
  *		if not NULL, dW_TEMP contains the derivatives of the negative log likelihood with respect to W
- *		
+ *		*CONSTANTS[11] contains the log of the determinant (double *)
  */
 
 #include "AIR.h"

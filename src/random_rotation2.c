@@ -1,5 +1,5 @@
 /* Copyright 2012-2014 Roger P. Woods, M.D. */
-/* Modified 6/11/2014 */
+/* Modified 7/18/2014 */
 
 /*
  * compute Y=R*X where X and Y are N X M matrices and R is a random orthonormal matrix
@@ -34,7 +34,7 @@ static void mulmat(double **a, const unsigned int m, const unsigned int n, doubl
 	}
 }
 
-void AIR_random_rotation(const unsigned int skip, double **r, const unsigned int n, const unsigned int m, double **x, double **y, double ***wrk)
+void AIR_random_rotation2(const unsigned int skip, double **r, const unsigned int rows, const unsigned int cols, double **in, double **tmp, double ***wrk)
 {
 	{
 		double pi=2.0*acos(0);
@@ -43,19 +43,18 @@ void AIR_random_rotation(const unsigned int skip, double **r, const unsigned int
 #ifdef USING_R
 		GetRNGstate();
 #endif
-		
+
 		for(randomization=0; randomization<=skip; randomization++){
 			AIR_Error errcode=1;
 			do{
 				unsigned int i;
-				for(i=0; i<n; i++){
+				for(i=0; i<cols; i++){
 	
 					r[i][i]=0.0;
 	
 					{
 						unsigned int j;
 						for(j=0; j<i; j++){
-						
 #ifndef USING_R
 							double angle=2*pi*rand()/(RAND_MAX+1.0);
 #else
@@ -68,12 +67,21 @@ void AIR_random_rotation(const unsigned int skip, double **r, const unsigned int
 						}
 					}
 				}
-				errcode=AIR_eexper_pade(n, r, wrk, 0);
+				errcode=AIR_eexper_pade(cols, r, wrk, 0);
 			} while (errcode!=0);
 		}
 #ifdef USING_R
 		PutRNGstate();
 #endif
 	}
-	mulmat(r, n, n, x, m, y);
+	mulmat(in, rows, cols, r, cols, tmp);
+	{
+		unsigned int j;
+		for(j=0; j<cols; j++){
+			unsigned int i;
+			for(i=0; i<rows; i++){
+				in[j][i]=tmp[j][i];
+			}
+		}
+	}
 }

@@ -1,6 +1,6 @@
 /* AIR.h --header file for Automated Image Registration Subroutines AIR 5.x
- * Copyright 1995-2011 Roger P. Woods, M.D.
- * Modified 3/18/11
+ * Copyright 1995-2012 Roger P. Woods, M.D.
+ * Modified 10/12/12
  */
 
 #include <stdio.h>
@@ -916,10 +916,13 @@ AIR_Error AIR_fprobr(const char *);
 
 AIR_Error AIR_fprobw(const char *, const AIR_Boolean);
 
+void AIR_free_ica_sources_aic10(void ***);
+
 void AIR_free_ica_sources_aic15(void ***);
 
-void AIR_free_ica_sources_aic15_matrix(void ***);
+void AIR_free_ica_sources_aic10_matrix(void ***);
 
+void AIR_free_ica_sources_aic15_matrix(void ***);
 
 AIR_Error AIR_gael(double **);
 
@@ -943,9 +946,11 @@ unsigned int AIR_icamax(const unsigned int, const double *, const double *);
 
 AIR_Error AIR_ica_plot(const AIR_Boolean, const char *, const unsigned int, const unsigned int, const unsigned int, double **, double, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, void **, const AIR_Boolean);
 
-AIR_Error AIR_ica_sources_aic15(const unsigned int, const unsigned int, void ***, const unsigned int, const double, unsigned int *, double **, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double **, unsigned int *, double ***, unsigned int, unsigned int **, double **, double **, double *, const char *, AIR_Error (*)(const AIR_Boolean, const char *, const unsigned int, const unsigned int, const unsigned int, double **, double, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, void **, const AIR_Boolean), void **, int *, double *, const AIR_Boolean, const AIR_Boolean, const AIR_Boolean);
+AIR_Error AIR_ica_sources_aic10(unsigned int, unsigned int, void ***, const unsigned int, const double, unsigned int *, double **, const unsigned int, const unsigned int, unsigned int, const unsigned int, const unsigned int, const unsigned int, double **, unsigned int *, double ***, unsigned int, unsigned int **, double **, double **, double *, const char *, AIR_Error (*data_saver)(const AIR_Boolean, const char *, const unsigned int, const unsigned int, const unsigned int, double **, double, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, void **, const AIR_Boolean), void **, int *, double *, const AIR_Boolean, const AIR_Boolean, const AIR_Boolean);
 
 AIR_Error AIR_ica_sources_aic10_matrix(const unsigned int, void ***, const unsigned int, unsigned int *, double **, const unsigned int, const unsigned int, AIR_Boolean, unsigned int, const unsigned int, const unsigned int, const unsigned int, double **, unsigned int *, double ***, unsigned int **, double **, double **, double *, const char *, AIR_Error (*)(const AIR_Boolean, const char *, const unsigned int, const unsigned int, const unsigned int, double **, double, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, void **, const AIR_Boolean), void **, int *, double *, const AIR_Boolean , const AIR_Boolean );
+
+AIR_Error AIR_ica_sources_aic15(const unsigned int, const unsigned int, unsigned int *, const unsigned int, const unsigned int, void ***, const unsigned int, const unsigned int, const double, unsigned int *, double **, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double **, unsigned int *, double ***, unsigned int, unsigned int **, double **, double **, double *, const char *, AIR_Error (*)(const AIR_Boolean, const char *, const unsigned int, const unsigned int, const unsigned int, double **, double, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, void **, const AIR_Boolean), void **, int *, double *, const AIR_Boolean, const AIR_Boolean, const AIR_Boolean);
 
 AIR_Error AIR_ica_sources_bias10(const unsigned int, const unsigned int, const unsigned int, const unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, unsigned int, double *);
 
@@ -953,13 +958,21 @@ double AIR_ica_MLf(/*@unused@*/ const unsigned int, const double *, double *, vo
 
 double AIR_ica_MLCf6(/*@unused@*/ const unsigned int, const double *, double *, void **);
 
+double AIR_ica_MLCf10(/*@unused@*/ const unsigned int, const double *, double *, void **);
+
+double AIR_ica_MLCf12(/*@unused@*/ const unsigned int, const double *, double *, void **);
+
 double AIR_ica_MLCf15(/*@unused@*/ const unsigned int, const double *, double *, void **);
 
 double AIR_ica_MLCf10_cv(/*@unused@*/ const unsigned int, const double *, double *, void **);
 
+double AIR_ica_MLCf10_cv_bias(/*@unused@*/ const unsigned int , const double *, double *, void **, unsigned int, double **);
+
 double AIR_ica_MLCf15_cv_bias(/*@unused@*/ const unsigned int , const double *, double *, void **, unsigned int, double **);
 
 double AIR_ica_MLCf10_j(/*@unused@*/ const unsigned int, const double *, double *, void **);
+
+double AIR_ica_MLCf10_j2(/*@unused@*/ const unsigned int, const double *, double *, void **);
 
 double AIR_ica_MLCf15_j2(/*@unused@*/ const unsigned int, const double *, double *, void **);
 
@@ -1164,6 +1177,8 @@ void AIR_radf5(const unsigned int, const unsigned int, double *, double *, const
 void AIR_radfg(const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, double *, double *, double *, double *, const double *);
 
 void AIR_random_rotation(const unsigned int, double **, const unsigned int, const unsigned int, double **, double **, double ***);
+
+void AIR_random_rotation2(const unsigned int , double **, const unsigned int, const unsigned int, double **, double **, double ***);
 
 void AIR_rank(const unsigned long int n, double *values, unsigned long int *rank);
 
@@ -1748,7 +1763,8 @@ enum {
     AIR_ICA_OPTIMIZATION_ERROR,
     AIR_ICA_CODING_ERROR,
 
-    AIR_REQUIRES_16_BITS_ERROR
+    AIR_REQUIRES_16_BITS_ERROR,
+    AIR_SHAPE_NORMALIZATION_ERROR
 
 
 

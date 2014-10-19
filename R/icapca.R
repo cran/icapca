@@ -1,4 +1,4 @@
-ica_pca <- function(x, inf_crit='unc', components=0, center=TRUE, subgaussian_range=NULL, supergaussian_range=NULL, gaussian_range=NULL, hinted_subgaussian_sources=NULL, hinted_supergaussian_sources=NULL, hinted_unspecified_sources=NULL, seed=0, offset_random=0, xval_epsilon=0.0, desired_initialization=0)
+ica_pca <- function(x, inf_crit='unc', components=0, center=TRUE, subgaussian_range=NULL, supergaussian_range=NULL, gaussian_range=NULL, hinted_subgaussian_sources=NULL, hinted_supergaussian_sources=NULL, hinted_unspecified_sources=NULL, seed=0, offset_random=0, fold=0, xval_epsilon=0.0, desired_initialization=0, sample_order=NULL, sample_offset=0, samples=0)
 {
 	if(!is.matrix(x)) stop("x must be a matrix")
 	mrows<-dim(x)[1]
@@ -136,10 +136,31 @@ ica_pca <- function(x, inf_crit='unc', components=0, center=TRUE, subgaussian_ra
 	xval_epsilon=as.double(xval_epsilon)
 	desired_initialization=as.integer(desired_initialization)
 	
+
+	if(!is.null(sample_order)){
+		if(!is.vector(sample_order) || !is.integer(sample_order)) stop("sample_order must be a vector of integers")
+		if(length(sample_order)!=ncols) stop("sample_order must be a vector with length matching the number of columns in the input data")
+		sample_order<-as.integer(sample_order);
+	}
+	samples=as.integer(samples)
+	if(samples>0){
+		sample_offset=as.integer(sample_offset)
+		if(is.null(sample_order)) stop("sample_order cannot be null when samples>0")
+	}	
+	fold=as.integer(fold)
+	if(fold>0){
+		if(inf_crit_numeric!=3) stop("fold can only be non-zero when inf_crit=='xval'")
+		if(fold==1) stop("fold cannot be equal to one");
+		if(ncols%%fold!=0) stop("fold must be a divisor of the number columns in the input matrix");
+	}
 	
+	if(seed>0){
+		set.seed(seed, kind="default", normal.kind="default")
+	}
 	
 	result<-.C("ica_pca_R", as.integer(error), as.integer(seed), as.integer(offset_random),
-	 as.integer(inf_crit_numeric), as.double(xval_epsilon), as.integer(ranges), 
+	 as.integer(sample_order), length(sample_order), as.integer(sample_offset), as.integer(samples),
+	 as.integer(inf_crit_numeric), as.integer(fold), as.double(xval_epsilon), as.integer(ranges), 
 	 as.double(x), as.integer(mrows), as.integer(ncols), 
 	 as.integer(components), as.double(ica_s), as.double(loglikelihood), as.integer(desired_initialization),
 	 as.integer(distribution), as.double(variance), 
@@ -151,14 +172,15 @@ ica_pca <- function(x, inf_crit='unc', components=0, center=TRUE, subgaussian_ra
 	 PACKAGE="icapca")
 	 	
 	if(result[[1]]>0) return(NULL)
-	ica_s<-matrix(result[[11]], nrow=result[[10]], ncol=ncols)
-	loglikelihood<-result[[12]]
-	distribution<-as.vector(result[[14]][1:result[[10]]])
-	variance<-as.vector(result[[15]][1:result[[10]]])
-	probability<-as.vector(result[[16]][1:(result[[10]]+1)])
-	subgaussian_range<-as.vector(result[[6]][1:2])
-	supergaussian_range<-as.vector(result[[6]][3:4])
-	gaussian_range<-as.vector(result[[6]][5:6])
+	ica_s<-matrix(result[[16]], nrow=result[[15]], ncol=ncols)
+	loglikelihood<-result[[17]]
+	distribution<-as.vector(result[[19]][1:result[[15]]])
+	variance<-as.vector(result[[20]][1:result[[15]]])
+	probability<-as.vector(result[[21]][1:(result[[15]]+1)])
+	
+	subgaussian_range<-as.vector(result[[11]][1:2])
+	supergaussian_range<-as.vector(result[[11]][3:4])
+	gaussian_range<-as.vector(result[[11]][5:6])
 	result<-list(s=ica_s, loglikelihood=loglikelihood, distribution=distribution, variance=variance, probability=probability, subgaussian_range=subgaussian_range, supergaussian_range=supergaussian_range, gaussian_range=gaussian_range)
 	return(result)
 }

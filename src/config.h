@@ -4,4 +4,6 @@
  * from a configure script
  */
 #include <R.h>
+#ifndef USING_R
 #define USING_R 1
+#endif

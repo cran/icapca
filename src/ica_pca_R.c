@@ -1,5 +1,5 @@
-/* Copyright 2010-2013 Roger P. Woods, M.D. */
-/* Modified: 1/25/2013 */
+/* Copyright 2010-2014 Roger P. Woods, M.D. */
+/* Modified: 10/19/2014 */
 
 #include "AIR.h"
 
@@ -16,7 +16,9 @@ static void *ica_pca_malloc(size_t n, int size){
 #endif
 }
 
-void ica_pca_R(int *error, int *seed, int *offset_random, int *inf_crit, double *xval_epsilon, 
+void ica_pca_R(int *error, int *seed, int *offset_random, 
+int *sample_order, int *sample_order_length, int *sample_offset, int *samples,
+int *inf_crit, int *fold, double *xval_epsilon, 
 int *ranges, double *em_array, int *mrows, int *ncols, int *components, 
 double *ica_s_array, double *loglikelihood, int *desired_initialization,
 int *distribution_R, double *variance_R, 
@@ -31,7 +33,11 @@ double *source_array, int *leave_rows_uncentered
 	double *variance=NULL;
 	double *probability=NULL;
 	double **source_matrix=NULL;
-	
+		
+	if(*sample_order_length==0){
+		sample_order=NULL;
+	}
+			
 	unsigned int source_count=*hinted_subgaussian_sources+*hinted_supergaussian_sources+*hinted_unspecified_sources;
 	double **em=(double **)ica_pca_malloc((size_t)*ncols, sizeof(double *));
 	if(!em){
@@ -59,7 +65,7 @@ double *source_array, int *leave_rows_uncentered
 		}
 	}
 	{
-		AIR_Error errcode=AIR_ica_sources_aic15(*seed, *offset_random, &constants, *inf_crit, *xval_epsilon, ranges, em, *mrows, *ncols, *hinted_subgaussian_sources, *hinted_supergaussian_sources, *hinted_unspecified_sources, source_matrix, components, &ica_s, *desired_initialization, &distribution, &variance, &probability, loglikelihood, NULL, NULL, NULL, NULL, NULL, (AIR_Boolean)*leave_rows_uncentered, (AIR_Boolean)FALSE, (AIR_Boolean)FALSE);
+		AIR_Error errcode=AIR_ica_sources_aic15(*seed, *offset_random, (unsigned int *)sample_order, *sample_offset, *samples, &constants, *inf_crit, *fold, *xval_epsilon, (unsigned int *)ranges, em, *mrows, *ncols, *hinted_subgaussian_sources, *hinted_supergaussian_sources, *hinted_unspecified_sources, source_matrix, (unsigned int *)components, &ica_s, *desired_initialization, &distribution, &variance, &probability, loglikelihood, NULL, NULL, NULL, NULL, NULL, (AIR_Boolean)*leave_rows_uncentered, (AIR_Boolean)FALSE, (AIR_Boolean)FALSE);
 		if(errcode){
 			ica_pca_free(em);
 			if(source_matrix!=NULL) ica_pca_free(source_matrix);

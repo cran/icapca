@@ -1,5 +1,5 @@
-/* Copyright 2005-2013 Roger P. Woods, M.D. */
-/* Modified: 12/7/13 */
+/* Copyright 2005-2014 Roger P. Woods, M.D. */
+/* Modified: 10/19/14 */
 
 /*
  * Main algorithm for ICA minimization with sub-Gaussian, super-Gaussian and Gaussian sources
@@ -10,6 +10,16 @@
  *
  *		OFFSET_RANDOM	the number of pseudorandom orthonormal rotations to skip before selecting one
  *
+ *		SAMPLE_ORDER[N]	an array of length N containing the numbers 1 to N in a suitably randomized order, only used when inf_crit==3
+ *							a non-null sample_order will be used if samples==0 (treated as if samples==n)
+ *
+ *		SAMPLE_OFFSET	the number of elements in sample_order to skip before sampling, only used when inf_crit==3
+ *							ignored if samples==0
+ *
+ *		SAMPLES			the number of elements to sample from sample_order, only used when inf_crit==3, 
+ *							if 0 (or n) every observation is left out in turn
+ *							otherwise, only the specified samples from sample_order are left out
+ *
  *		CONSTANTS_PTR	a void ***
  *
  *		INF_CRIT		the information criterion to use:
@@ -18,6 +28,12 @@
  *							2: Bayesian Information Criterion of Schwarz (BIC)
  *							3: N-fold leave one out cross validation
  *							>3: Second order AIC correction (requires no non-Gaussian sources
+ *
+ *		FOLD			when inf_crit==3, specifies the fold of the cross-validation:
+ *							0: uses leave-one-out cross validation, same as fold==n, but computed with more efficiently
+ *							1: invalid value
+ *							1<fold<=n: fold of cross-validation if (n/fold)*fold==n, otherwise invalid value
+ *							n: same as fold==0 but computed using generic implementation
  *
  *		XVAL_EPSILON	value used when inf_crit==3 to screen uncorrected loglikelihoods
  *						for redundant initializations
@@ -162,6 +178,8 @@
 #include <float.h>
 #define CONSTANT_COUNT 100
 #define NULL_INDEX 10
+
+#define MAXFUN 25000
  
 struct hoods{
 	double value;
@@ -459,45 +477,115 @@ static unsigned int increment_index(const unsigned int dimensions, unsigned int 
 		return(0);
 	}
 }
-
-static unsigned int count_valid_indices(const unsigned int dimensions, unsigned int *distribution, unsigned int *ranges){
-
+static unsigned int count_valid_indices_quickly(const unsigned int dimensions, unsigned int *distribution, unsigned int *ranges){
+	// compute dimesions!/(subgc!*supergc!*gc!)
 	unsigned int count=0;
+	double count2=0.0;
 	
-	unsigned int zeros=0;
-	unsigned int ones=0;
-	unsigned int twos=0;
+	if(ranges[0]+ranges[2]+ranges[4]==dimensions){
 	
-	unsigned int max_subgc=0;
-	unsigned int min_subgc=(unsigned int)-1;
-	unsigned int max_supergc=0;
-	unsigned int min_supergc=(unsigned int)-1;
-	unsigned int max_gc=0;
-	unsigned int min_gc=(unsigned int)-1;
-					
+		unsigned int r0=ranges[0];
+		unsigned int r1=ranges[2];
+		unsigned int r2=ranges[4];
+		
+		// Sort so r2>=r1>=r0
+		if(r0>r1){
+			unsigned int temp=r1;
+			r1=r0;
+			r0=temp;
+		}
+		if(r0>r2){
+			unsigned int temp=r2;
+			r2=r0;
+			r0=temp;
+		}
+		if(r1>r2){
+			unsigned int temp=r2;
+			r2=r1;
+			r1=temp;
+		}
+		
+		count=1;
+		/* Protect against overflow */
+		count2=1.0;
+		{
+			unsigned int i;
+			for(i=r2+1; i<=dimensions; i++){
+				count*=i;
+				count2*=i;
+			}
+		}
+		if(count2>(double)UINT_MAX){
+			count=UINT_MAX;
+		}
+		else{
+			{
+				unsigned int i;
+				for(i=r1; i>1; i--){
+					count/=i;
+					count2/=i;
+				}
+			}
+			{
+				unsigned int i;
+				for(i=r0; i>1; i--){
+					count/=i;
+					count2/=i;
+				}
+			}
+		}
+	}
 	{
 		int i;
 		for(i=0; i<dimensions; i++){
 			distribution[i]=NULL_INDEX;
 		}
 	}
-	while(increment_index(dimensions, distribution, ranges, &zeros, &ones, &twos)!=0){
-		if(zeros>max_subgc) max_subgc=zeros;
-		if(zeros<min_subgc) min_subgc=zeros;
-		if(ones>max_supergc) max_supergc=ones;
-		if(ones<min_supergc) min_supergc=ones;
-		if(twos>max_gc) max_gc=twos;
-		if(twos<min_gc) min_gc=twos;
-		count++;
-	}
-	ranges[0]=min_subgc;
-	ranges[1]=max_subgc;
-	ranges[2]=min_supergc;
-	ranges[3]=max_supergc;
-	ranges[4]=min_gc;
-	ranges[5]=max_gc;
+	return count;
+}
 
-	return(count);
+static unsigned int count_valid_indices(const unsigned int dimensions, unsigned int *distribution, unsigned int *ranges){
+	if(ranges[0]==ranges[1] && ranges[2]==ranges[3] && ranges[4]==ranges[5]){
+		return count_valid_indices_quickly(dimensions, distribution, ranges);
+	}
+	else{
+		unsigned int count=0;
+		
+		unsigned int zeros=0;
+		unsigned int ones=0;
+		unsigned int twos=0;
+		
+		unsigned int max_subgc=0;
+		unsigned int min_subgc=(unsigned int)-1;
+		unsigned int max_supergc=0;
+		unsigned int min_supergc=(unsigned int)-1;
+		unsigned int max_gc=0;
+		unsigned int min_gc=(unsigned int)-1;
+						
+		{
+			int i;
+			for(i=0; i<dimensions; i++){
+				distribution[i]=NULL_INDEX;
+			}
+		}
+		while(increment_index(dimensions, distribution, ranges, &zeros, &ones, &twos)!=0){
+			if(zeros>max_subgc) max_subgc=zeros;
+			if(zeros<min_subgc) min_subgc=zeros;
+			if(ones>max_supergc) max_supergc=ones;
+			if(ones<min_supergc) min_supergc=ones;
+			if(twos>max_gc) max_gc=twos;
+			if(twos<min_gc) min_gc=twos;
+			count++;
+		}
+		ranges[0]=min_subgc;
+		ranges[1]=max_subgc;
+		ranges[2]=min_supergc;
+		ranges[3]=max_supergc;
+		ranges[4]=min_gc;
+		ranges[5]=max_gc;
+	
+		return(count);
+	}
 }
 
 static void go_to_index(const unsigned int index, const unsigned int dimensions, unsigned int *distribution, unsigned int *ranges){
@@ -581,7 +669,7 @@ void AIR_free_ica_sources_aic15(void ***constants_ptr){
 	
 	
 	// These are used for aic_logP
-	if(constants[90]) ica_pca_free(constants[90]);					// internal total_permutations
+	if(constants[90]) ica_pca_free(constants[90]);					// internal enough_permutations
 	if(constants[91]) ica_pca_free(constants[91]);					// aic_logP
 	
 	if(constants) ica_pca_free(constants);
@@ -780,7 +868,7 @@ static AIR_Error AIR_ica_aic_logP_init(void ***constants, const unsigned int tot
 
 static AIR_Error AIR_ica_init(void ***constants, const unsigned int ica_p, 
 	const unsigned int ica_n, const unsigned int hinted_sources, 
-	AIR_Boolean xval_and_do_not_leave_uncentered, AIR_Boolean randomize){
+	AIR_Boolean xval_and_do_not_leave_uncentered, AIR_Boolean randomize_ica_x){
 
 	/*
 	 * This will allocate all the memory needed to perform ica_optimization
@@ -933,7 +1021,7 @@ static AIR_Error AIR_ica_init(void ***constants, const unsigned int ica_p,
 	// ica_constants[10]=supergc;
 	// gc=m-subgc-supergc
 	
-	if(xval_and_do_not_leave_uncentered || randomize){
+	if(xval_and_do_not_leave_uncentered || randomize_ica_x){
 		if(ica_p_is_too_small || ica_n_is_too_small || ica_constants[12]==NULL){
 		
 			if(ica_constants[12]){
@@ -1160,7 +1248,7 @@ static AIR_Error AIR_ica_init(void ***constants, const unsigned int ica_p,
 }
 
 
-AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offset_random, void ***constants_ptr, const unsigned int inf_crit, const double xval_epsilon, unsigned int *ranges, double **em, const unsigned int points, const unsigned int n, const unsigned int hinted_subgaussian_sources, const unsigned int hinted_supergaussian_sources, const unsigned int hinted_unspecified_sources, double **source_matrix, unsigned int *components, double ***ica_s_ptr, unsigned int desired_initialization, unsigned int **distribution_ptr, double **variance_ptr, double **probability_ptr, double *loglikelihood, const char *outprefix, AIR_Error (*data_saver)(const AIR_Boolean, const char *, const unsigned int, const unsigned int, const unsigned int, double **, double, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, void **, const AIR_Boolean), void **plot_constants, int *model_of_interest, double *moi_probability, const AIR_Boolean leave_rows_uncentered, const AIR_Boolean verbose, const AIR_Boolean ow){
+AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offset_random, unsigned int *sample_order, const unsigned int sample_offset, const unsigned int samples, void ***constants_ptr, const unsigned int inf_crit, const unsigned int fold, const double xval_epsilon, unsigned int *ranges, double **em, const unsigned int points, const unsigned int n, const unsigned int hinted_subgaussian_sources, const unsigned int hinted_supergaussian_sources, const unsigned int hinted_unspecified_sources, double **source_matrix, unsigned int *components, double ***ica_s_ptr, unsigned int desired_initialization, unsigned int **distribution_ptr, double **variance_ptr, double **probability_ptr, double *loglikelihood, const char *outprefix, AIR_Error (*data_saver)(const AIR_Boolean, const char *, const unsigned int, const unsigned int, const unsigned int, double **, double, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, const unsigned int, double *, void **, const AIR_Boolean), void **plot_constants, int *model_of_interest, double *moi_probability, const AIR_Boolean leave_rows_uncentered, const AIR_Boolean verbose, const AIR_Boolean ow){
  	
  	void **constants;
  	 	
@@ -1169,14 +1257,52 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 	*variance_ptr=NULL;
 	*probability_ptr=NULL;
 	
+	unsigned int stride=1;
+	
 	const unsigned int hinted_sources=hinted_subgaussian_sources+hinted_supergaussian_sources+hinted_unspecified_sources;
 	const unsigned int nonpermuted_sources=hinted_subgaussian_sources+hinted_supergaussian_sources;
 	
+#ifndef USING_R
 	if(seed!=0){
 		srand(seed);
 	}
-	
+#endif
+		
 	if(points==0 || n==0 || *components==0) return 0;	// Nothing to do
+	
+	if(inf_crit==3 && fold){
+		if(fold==1){
+#ifndef USING_R
+			printf("%s: %d: ",__FILE__,__LINE__);
+			printf("cross-validation fold of 1 is not valid\n");
+#else
+			REprintf("%s: %d: ",__FILE__,__LINE__);
+			REprintf("cross_validation fold of 1 is not valid\n");
+#endif
+			return AIR_USER_INTERFACE_ERROR;
+		}
+		if(samples!=0 && samples!=n){
+#ifndef USING_R
+			printf("%s: %d: ",__FILE__,__LINE__);
+			printf("all %u samples must be used when %u fold cross-validation is specified\n", n, fold);
+#else
+			REprintf("%s: %d: ",__FILE__,__LINE__);
+			REprintf("all %u samples must be used when %u fold cross-validation is specified\n", n, fold);
+#endif
+			return AIR_USER_INTERFACE_ERROR;
+		}
+		stride=n/fold;
+		if(stride*fold!=n){
+#ifndef USING_R
+			printf("%s: %d: ",__FILE__,__LINE__);
+			printf("cross-validation fold (%u) is not a factor of n (%u)\n", fold, n);
+#else
+			REprintf("%s: %d: ",__FILE__,__LINE__);
+			REprintf("cross_validation fold (%u) is not a factor of n (%u)\n", fold, n);
+#endif
+			return AIR_USER_INTERFACE_ERROR;
+		}
+	}
 	
 	// Look for fatal errors that should have been caught by user interface
 	if( (hinted_sources>0) && source_matrix==NULL){
@@ -1198,6 +1324,44 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 		REprintf("Cannot leave rows uncentered when using second order corrected AIC for gaussian sources\n");
 #endif
 		return AIR_USER_INTERFACE_ERROR;
+	}
+
+	if(inf_crit==3 && samples){
+		if(sample_offset+samples>n){
+#ifndef USING_R
+			printf("%s: %d: ",__FILE__,__LINE__);
+			printf("Sum of sample offsets and number of samples cannot exceed number of observations\n");
+#else
+			REprintf("%s: %d: ",__FILE__,__LINE__);
+			REprintf("Sum of sample offsets and number of samples cannot exceed number of observations\n");
+#endif
+			return AIR_USER_INTERFACE_ERROR;
+		}
+	}
+	if(inf_crit==3 && sample_order){
+		{
+			unsigned int j;
+			for(j=n; j>0; j--){
+				int found=0;
+				unsigned int i;
+				for(i=0; i<n; i++){
+					if(sample_order[i]==j){
+						found=1;
+						break;
+					}
+				}
+				if(!found){
+#ifndef USING_R
+					printf("%s: %d: ",__FILE__,__LINE__);
+					printf("Cross-validation sample order should contain the integers 1 through %u, the value %u is missing\n",n, j);
+#else
+					REprintf("%s: %d: ",__FILE__,__LINE__);
+					REprintf("Cross-validation sample order should contain the integers 1 through %u, the value %u is missing\n",n, j);
+#endif
+					return AIR_USER_INTERFACE_ERROR;
+				}
+			}
+		}
 	}
 	{
 		AIR_Boolean use_subgc=(AIR_Boolean)TRUE;
@@ -1224,7 +1388,6 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 			AIR_Error errcode=data_saver((AIR_Boolean)TRUE, outprefix, 0, n, *components, NULL, 0, 0, 0, 0, 0, 0, 0, inf_crit, NULL, plot_constants, ow);
 			if(errcode!=0) return errcode;
 		}
-
 		{
 			if(!leave_rows_uncentered){
 				/* Center each row by subtracting the row mean 
@@ -1304,7 +1467,6 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 					{
 						double *work=constants[84];
 						double *e=constants[85];
-												
 						{
 							AIR_Error errcode;
 							
@@ -1359,7 +1521,6 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 									total_variance+=added_variance;
 								}
 							}
-
 							/* Check for trivial components, decrementing ica_p to the number of non-trivial ones */
 							{
 								unsigned int first_trivial_index;
@@ -1375,9 +1536,10 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 								ica_p=first_trivial_index;
 							}
 							if(*components<ica_p) ica_p=*components;
-							
 							/* Cross validation runs decrement number of columns, so decrement ica_p so rows<=columns-1 */
-							if(inf_crit==3 && (ica_p==ica_n)) ica_p--;
+							if(inf_crit==3){
+								if(ica_p>ica_n-stride) ica_p=ica_n-stride;
+							}
 							
 							*components=ica_p;
 														
@@ -1436,7 +1598,6 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 									return AIR_USER_INTERFACE_ERROR;
 								}
 							}
-
 							if(hinted_sources>ica_p){
 #ifndef USING_R
 								printf("%s: %d: ",__FILE__,__LINE__);
@@ -1471,7 +1632,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 								return AIR_ICA_EXCESS_SOURCE_ERROR;
 							}
 							{
-								AIR_Error errcode=AIR_ica_init(constants_ptr, ica_p, ica_n, hinted_sources, !leave_rows_uncentered && (inf_crit==3), seed!=0);
+								AIR_Error errcode=AIR_ica_init(constants_ptr, ica_p, ica_n, hinted_sources, (sample_order || !leave_rows_uncentered || fold) && (inf_crit==3), (seed!=0 && hinted_sources==0));
 								if(errcode){
 									AIR_free_ica_sources_aic15(constants_ptr);
 									return errcode;
@@ -1497,7 +1658,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 								
 								double **null_matrix=constants[50];
 								
-								unsigned int all_sources=hinted_sources;
+								const unsigned int all_sources=hinted_sources;
 								
 								unsigned int subgc=0;
 								unsigned int supergc=0;
@@ -1675,8 +1836,8 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 											}
 										}
 									}
-									/* Randomly rotate ica_x */
-									if(seed!=0){
+									if(seed!=0 && all_sources==0){
+										/* Randomly rotate ica_x */
 										double **r=AIR_matrix2(ica_p, ica_p);
 										double ***wrk=AIR_matrix3(ica_p, ica_p, 4);
 										double **ica_x_copy=constants[12];
@@ -1699,7 +1860,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 										AIR_free_2(r);
 										AIR_free_3(wrk);
 									}
-									else if(!leave_rows_uncentered && (inf_crit==3)){
+									else if( (sample_order || !leave_rows_uncentered || fold) && (inf_crit==3)){
 									
 										/* Make a backup copy of ica_x */
 										double **ica_x_copy=constants[12];
@@ -1715,6 +1876,17 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 											}
 										}
 									}
+									if(seed!=0 && all_sources!=0){
+										/* Randomly rotate null_matrix */
+										double **r=AIR_matrix2(ica_p-all_sources, ica_p-all_sources);
+										double ***wrk=AIR_matrix3(ica_p-all_sources, ica_p-all_sources, 4);
+										double **tmp=AIR_matrix2(ica_p, ica_p-all_sources);
+										
+										AIR_random_rotation2(offset_random, r, ica_p, ica_p-all_sources, null_matrix+all_sources, tmp, wrk);
+										AIR_free_2(r);
+										AIR_free_3(wrk);
+										AIR_free_2(tmp);
+									}
 									/* Store ica_scale_x in case it's needed for bias computations */
 									{
 										double *temp=(double *)constants[51];
@@ -1723,9 +1895,15 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 									/* Perform ICA optimization */
 									{
 										const unsigned int total_permutations=count_valid_indices(ica_p-nonpermuted_sources, distribution+nonpermuted_sources, permuted_ranges);
+										unsigned int enough_permutations=total_permutations;
 										unsigned int working_permutations=total_permutations;
 										unsigned int min_possible_gaussians=0;
 										unsigned int max_possible_gaussians=0;
+										
+										if(desired_initialization!=0 && desired_initialization<enough_permutations){
+											enough_permutations=desired_initialization;
+											working_permutations=desired_initialization;
+										}
 										
 										if(inf_crit>3 && ranges[5]+3>=ica_n){
 #ifndef USING_R
@@ -1758,7 +1936,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 											}
 										}
 										{
-											AIR_Error errcode=AIR_ica_aic_logP_init(constants_ptr, total_permutations);
+											AIR_Error errcode=AIR_ica_aic_logP_init(constants_ptr, enough_permutations);
 											if(errcode){
 												AIR_free_ica_sources_aic15(constants_ptr);
 												return errcode;
@@ -1769,7 +1947,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 											struct hoods *aic_logP=(struct hoods *)constants[91];
 											if(desired_initialization==0){
 												unsigned int index;
-												for(index=0; index<total_permutations; index++){
+												for(index=0; index<enough_permutations; index++){
 													aic_logP[index].rank=index;
 												}
 											}
@@ -1796,8 +1974,8 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 												aic_logP[0].rank=desired_initialization-1;
 												{
 													unsigned int index;
-													for(index=1; index<total_permutations; index++){
-														aic_logP[index].rank=total_permutations;
+													for(index=1; index<enough_permutations; index++){
+														aic_logP[index].rank=enough_permutations;
 														aic_logP[index].value=0.0;
 													}
 												}
@@ -1840,7 +2018,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 																distribution[i]=NULL_INDEX;
 															}
 														}
-														if(verbose){
+														if(verbose && !desired_initialization){
 #ifndef USING_R
 															if(pass>0){
 																printf("testing %u distinct initializations of %u total initializations\n", working_permutations, total_permutations);
@@ -1863,9 +2041,9 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 															}
 #endif
 														}
-														for(index=0; index<total_permutations; index++){
-														
-															if(current_aic_logP->rank==total_permutations) break;
+														for(index=0; index<enough_permutations; index++){
+																												
+															if(current_aic_logP->rank==enough_permutations) break;
 														
 															/* Get the next distribution */
 															increment_index(ica_p-nonpermuted_sources, distribution+nonpermuted_sources, permuted_ranges, &zeros, &ones, &twos);
@@ -1899,7 +2077,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 															{
 																double dx=1.0;
 																double eps[2]={1e-4, 1e-8};
-																unsigned int maxfun=1000;
+																unsigned int maxfun=MAXFUN;
 																int stopped=AIR_ucminf(AIR_ica_MLCf15,ica_p*(subgc+supergc),ica_ica_w, &dx, constants, eps, &maxfun, ica_ica_work, ica_p*ica_p*(ica_p*ica_p+13)/2, 1);
 																if(stopped < 0){
 																	if(subgc+supergc!=0){
@@ -1934,130 +2112,293 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 																			}
 																		}
 																		else if(working_inf_crit==3){
-																			ica_n--;
-																			{
-																				/* Copy ica_ica_w into ica_ica_w2 */
-																				double *temp=ica_ica_w;
-																				double *temp2=constants[52];
-																				
-																				unsigned int i;
-																				for(i=0; i< ica_p*(subgc+supergc); i++){
-																						
-																					*temp2++=*temp++;
-																				}
-																			}
-																			{
-																				int j;
-																				for(j=ica_n; j>=0; j--){
-																					/* Swap column j into the last column */
+																			if(!fold){
+																				/* This is optimized leave-one-out cross validation */
+																				ica_n--;
+																				{
+																					/* Copy ica_ica_w into ica_ica_w2 */
+																					double *temp=ica_ica_w;
+																					double *temp2=constants[52];
+																					
 																					unsigned int i;
-																					for(i=0; i<ica_p; i++){
-																					
-																						double temp=ica_x[j][i];
-																						ica_x[j][i]=ica_x[ica_n][i];
-																						ica_x[ica_n][i]=temp;
-																					}
-																					if(!leave_rows_uncentered){
-																					
-																						/* Re-center based on all but the left out sample
-																						 *  and apply same adjustment to the one left out
-																						 */
-																						unsigned int jj;
-																						for(jj=0; jj<=ica_n; jj++){
+																					for(i=0; i< ica_p*(subgc+supergc); i++){
 																							
-																							unsigned int i;
-																							for(i=0; i<ica_p; i++){
-																								
-																								double rezero_adj=ica_x[ica_n][i]/ica_n;
-																								ica_x[jj][i]+=rezero_adj;
+																						*temp2++=*temp++;
+																					}
+																				}
+																				{
+																					int j;
+																					if(samples) j=sample_offset+samples-1;
+																					else j=ica_n;
+																					for(; j>=0; j--){
+
+																						if(sample_order){
+	
+																							if(j<sample_offset) break;
+																							
+																							/* Swap designated column into the last column */
+																							{
+																								unsigned int i;
+																								for(i=0; i<ica_p; i++){
+																									
+																									double temp=ica_x[sample_order[j]-1][i];
+																									ica_x[sample_order[j]-1][i]=ica_x[ica_n][i];
+																									ica_x[ica_n][i]=temp;
+																								}
 																							}
 																						}
-																					}
-																					{
-																						/* Copy ica_ica_w2 back into ica_ica_w
-																						 *  to initialize search with best parameters
-																						 *  obtained from full dataset
-																						 */
-																						double *temp=ica_ica_w;
-																						double *temp2=constants[52];
+																						else{
 																						
-																						unsigned int i;
-																						for(i=0; i< ica_p*(subgc+supergc); i++){
-																								
-																							*temp++=*temp2++;
+																							/* Swap column j into the last column */
+																							unsigned int i;
+																							for(i=0; i<ica_p; i++){
+																							
+																								double temp=ica_x[j][i];
+																								ica_x[j][i]=ica_x[ica_n][i];
+																								ica_x[ica_n][i]=temp;
+																							}
 																						}
-																					}
-																					/* Optimize for all but last column */
-																					stopped=AIR_ucminf(AIR_ica_MLCf15,ica_p*(subgc+supergc),ica_ica_w, &dx, constants, eps, &maxfun, ica_ica_work, ica_p*ica_p*(ica_p*ica_p+13)/2, 1);
-																					if(stopped < 0){
-																						if(subgc+supergc!=0){
+																						if(!leave_rows_uncentered){
+																						
+																							/* Re-center based on all but the left out sample
+																							 *  and apply same adjustment to the one left out
+																							 */
+																							unsigned int jj;
+																							for(jj=0; jj<=ica_n; jj++){
+																								
+																								unsigned int i;
+																								for(i=0; i<ica_p; i++){
+																									
+																									double rezero_adj=ica_x[ica_n][i]/ica_n;
+																									ica_x[jj][i]+=rezero_adj;
+																								}
+																							}
+																						}
+	
+																						/* Optimize for all but last column */
+																						dx=1.0;
+																						maxfun=MAXFUN;
+																						stopped=AIR_ucminf(AIR_ica_MLCf15,ica_p*(subgc+supergc),ica_ica_w, &dx, constants, eps, &maxfun, ica_ica_work, ica_p*ica_p*(ica_p*ica_p+13)/2, 1);
+																						if(stopped < 0){
+																							if(subgc+supergc!=0){
 #ifndef USING_R
-																							printf("%s: %d: ",__FILE__,__LINE__);
-																							printf("Failure in ICA routine due to condition %i\n",stopped);
+																								printf("%s: %d: ",__FILE__,__LINE__);
+																								printf("Failure in ICA routine due to condition %i\n",stopped);
 #else
-																							REprintf("%s: %d: ",__FILE__,__LINE__);
-																							REprintf("Failure in ICA routine due to condition %i\n",stopped);
+																								REprintf("%s: %d: ",__FILE__,__LINE__);
+																								REprintf("Failure in ICA routine due to condition %i\n",stopped);
 #endif
-																							AIR_free_ica_sources_aic15(constants_ptr);
-																							return(AIR_ICA_OPTIMIZATION_ERROR);
+																								ica_n++;
+																								AIR_free_ica_sources_aic15(constants_ptr);
+																								return(AIR_ICA_OPTIMIZATION_ERROR);
+																							}
 																						}
-																					}
-																					/* Compute contribution from last column */
-																					aic_negloglike+=AIR_ica_MLCf15_cv_bias(ica_p*ica_p,ica_ica_w,NULL,constants, 1, &ica_x[ica_n]);
-																					{
-																						/* Copy ica_ica_w2 back into ica_ica_w
-																						 *  for next iteration or for subsequent
-																						 *  computations
-																						 */
-																						double *temp=ica_ica_w;
-																						double *temp2=constants[52];
-																						
-																						unsigned int i;
-																						for(i=0; i< ica_p*(subgc+supergc); i++){
-																								
-																							*temp++=*temp2++;
+																						/* Compute contribution from last column */
+																						{
+																							double temp=AIR_ica_MLCf15_cv_bias(ica_p*ica_p,ica_ica_w,NULL,constants, 1, &ica_x[ica_n]);
+																							aic_negloglike+=temp;
 																						}
-																					}
-																					if(!leave_rows_uncentered){
-																					
-																						double **ica_x_copy=constants[12];
-																						unsigned int jj;
-																						
-																						for(jj=0; jj<=ica_n; jj++){
+																						{
+																							/* Copy ica_ica_w2 back into ica_ica_w
+																							 *  for next iteration or for subsequent
+																							 *  computations
+																							 */
+																							double *temp=ica_ica_w;
+																							double *temp2=constants[52];
 																							
 																							unsigned int i;
-																							for(i=0; i<ica_p; i++){
+																							for(i=0; i< ica_p*(subgc+supergc); i++){
+																									
+																								*temp++=*temp2++;
+																							}
+																						}
+																						if(sample_order || !leave_rows_uncentered){
+																						
+																							double **ica_x_copy=constants[12];
+																							unsigned int jj;
 																							
-																								ica_x[jj][i]=ica_x_copy[jj][i];
+																							for(jj=0; jj<=ica_n; jj++){
+																								
+																								unsigned int i;
+																								for(i=0; i<ica_p; i++){
+																								
+																									ica_x[jj][i]=ica_x_copy[jj][i];
+																								}
+																							}
+																						}
+																					}
+																					if(leave_rows_uncentered && !sample_order){
+																						/* Undo the swaps 
+																						 * (if leave_rows_uncentered is false or sample_order is not null, original value
+																						 * will have just been copied from ica_x_copy
+																						 * and would not be recoverable by the
+																						 * swaps below
+																						 */
+																						for(j=0; j<=ica_n; j++){
+																							/* Undo the swaps */
+																							unsigned int i;
+																							for(i=0; i<ica_p; i++){
+																								
+																								double temp=ica_x[ica_n][i];
+																								ica_x[ica_n][i]=ica_x[j][i];
+																								ica_x[j][i]=temp;
 																							}
 																						}
 																					}
 																				}
-																				if(leave_rows_uncentered){
-																					/* Undo the swaps 
-																					 * (if leave_rows_uncentered is false, original value
-																					 * will have just been copied from ica_x_copy
-																					 * and would not be recoverable by the
-																					 * swaps below
-																					 */
-																					for(j=0; j<=ica_n; j++){
-																						/* Undo the swaps */
-																						unsigned int i;
-																						for(i=0; i<ica_p; i++){
+																				ica_n++;
+																				if(samples) aic_negloglike*=((double)ica_n)/((double)samples);
+																			}
+																			else{
+																				/* This is k-fold cross validation */
+																				ica_n-=stride;
+																				{
+																					/* Copy ica_ica_w into ica_ica_w2 */
+																					double *temp=ica_ica_w;
+																					double *temp2=constants[52];
+																					
+																					unsigned int i;
+																					for(i=0; i< ica_p*(subgc+supergc); i++){
 																							
-																							double temp=ica_x[ica_n][i];
-																							ica_x[ica_n][i]=ica_x[j][i];
-																							ica_x[j][i]=temp;
+																						*temp2++=*temp++;
+																					}
+																				}
+																				{
+																					/* sample_offset==0, samples=n */
+																					int j;
+																					for(j=ica_n; j>=0; j-=stride){
+																					
+																						if(sample_order){
+																								
+																							/* Swap designated block into the last block */
+																							unsigned int s;
+																							for(s=0; s<stride; s++){
+																							
+																								unsigned int i;
+																								for(i=0; i<ica_p; i++){
+																									
+																									double temp=ica_x[sample_order[j+s]-1][i];
+																									ica_x[sample_order[j+s]-1][i]=ica_x[ica_n+s][i];
+																									ica_x[ica_n+s][i]=temp;
+																								}
+																							}
+																						}
+																						else{
+																						
+																							/* Swap block j into the last block */
+																							unsigned int s;
+																							for(s=0; s<stride; s++){
+																								unsigned int i;
+																								for(i=0; i<ica_p; i++){
+																								
+																									double temp=ica_x[j+s][i];
+																									ica_x[j+s][i]=ica_x[ica_n+s][i];
+																									ica_x[ica_n+s][i]=temp;
+																								}
+																							}
+																						}
+																						if(!leave_rows_uncentered){
+																						
+																							/* Re-center based on all but the left out block
+																							 *  and apply same adjustment to the one left out
+																							 */
+																							 
+																							unsigned int i;
+																							for(i=0; i<ica_p; i++){
+																							
+																								double rezero_adj=0.0;
+																								
+																								unsigned int jj;
+																								for(jj=0; jj<ica_n; jj++){
+																									
+																									rezero_adj+=ica_x[jj][i];
+																								}
+																								rezero_adj/=ica_n;
+																								for(jj=0; jj<ica_n+stride; jj++){
+																								
+																									ica_x[jj][i]-=rezero_adj;
+																								}
+																							}
+																						}
+	
+																						/* Optimize for all but last column */
+																						dx=1.0;
+																						maxfun=MAXFUN;
+																						stopped=AIR_ucminf(AIR_ica_MLCf15,ica_p*(subgc+supergc),ica_ica_w, &dx, constants, eps, &maxfun, ica_ica_work, ica_p*ica_p*(ica_p*ica_p+13)/2, 1);
+																						if(stopped < 0){
+																							if(subgc+supergc!=0){
+#ifndef USING_R
+																								printf("%s: %d: ",__FILE__,__LINE__);
+																								printf("Failure in ICA routine due to condition %i\n",stopped);
+#else
+																								REprintf("%s: %d: ",__FILE__,__LINE__);
+																								REprintf("Failure in ICA routine due to condition %i\n",stopped);
+#endif
+																								ica_n++;
+																								AIR_free_ica_sources_aic15(constants_ptr);
+																								return(AIR_ICA_OPTIMIZATION_ERROR);
+																							}
+																						}
+																						/* Compute contribution from last column */
+																						{
+																							double temp=AIR_ica_MLCf15_cv_bias(ica_p*ica_p,ica_ica_w,NULL,constants, stride, &ica_x[ica_n]);
+																							aic_negloglike+=temp;
+																						}
+																						{
+																							/* Copy ica_ica_w2 back into ica_ica_w
+																							 *  for next iteration or for subsequent
+																							 *  computations
+																							 */
+																							double *temp=ica_ica_w;
+																							double *temp2=constants[52];
+																							
+																							unsigned int i;
+																							for(i=0; i< ica_p*(subgc+supergc); i++){
+																									
+																								*temp++=*temp2++;
+																							}
+																						}
+																						if(sample_order || !leave_rows_uncentered || fold){
+																						
+																							double **ica_x_copy=constants[12];
+																							unsigned int jj;
+																							
+																							for(jj=0; jj<=ica_n; jj++){
+																								
+																								unsigned int i;
+																								for(i=0; i<ica_p; i++){
+																								
+																									ica_x[jj][i]=ica_x_copy[jj][i];
+																								}
+																							}
+																						}
+																					}
+																					if(!fold && leave_rows_uncentered && !sample_order){
+																						/* Undo the swaps 
+																						 * (if fold is non-zero or leave_rows_uncentered is false or samples_order is non-null, original value
+																						 * will have just been copied from ica_x_copy
+																						 * and would not be recoverable by the
+																						 * swaps below
+																						 */
+																						for(j=0; j<=ica_n; j++){
+																							/* Undo the swaps */
+																							unsigned int i;
+																							for(i=0; i<ica_p; i++){
+																								
+																								double temp=ica_x[ica_n][i];
+																								ica_x[ica_n][i]=ica_x[j][i];
+																								ica_x[j][i]=temp;
+																							}
 																						}
 																					}
 																				}
+																				ica_n+=stride;
 																			}
-																			ica_n++;
 																			aic_negloglike-=negloglike;
 																		}
 																	}
 																	else{
-																		/* This use ica_MLCf15_j2, which has built in bias correction
+																		/* This uses ica_MLCf15_j2, which has built in bias correction
 																		 * for gaussian sources and associated centering terms 
 																		 */
 																		negloglike=AIR_ica_MLCf15_j2(ica_p*ica_p,ica_ica_w,NULL,constants);
@@ -2127,11 +2468,11 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 													if(passes>1 && pass==0){
 														/* Here we find the indices of nondegenerate initialiations */
 														/* Sort from highest relative probability to lowest */
-														qsort(aic_logP, (size_t)(total_permutations),sizeof(struct hoods),compare_hoods);
+														qsort(aic_logP, (size_t)(enough_permutations),sizeof(struct hoods),compare_hoods);
 														/* Zero out any item that is degenerate in terms of likelihood and component type */
 														if(xval_epsilon<0.0){
 															unsigned int i;
-															for(i=0; i<total_permutations; i++){
+															for(i=0; i<enough_permutations; i++){
 																char baseval[30];
 																char basevaldet[30];
 																snprintf(baseval, 29, "%e", aic_logP[i].value);
@@ -2140,7 +2481,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 																if(aic_logP[i].value==0.0) continue;
 																{
 																	unsigned int j;
-																	for(j=i+1; j<total_permutations; j++){
+																	for(j=i+1; j<enough_permutations; j++){
 																		if(aic_logP[j].subgc==aic_logP[i].subgc && aic_logP[j].supergc==aic_logP[i].supergc && aic_logP[j].gc==aic_logP[i].gc){
 																			char newval[30];
 																			char newvaldet[30];
@@ -2149,7 +2490,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 																			if(!strcmp(baseval, newval)){
 																				if(!strcmp(basevaldet, newvaldet)){
 																					aic_logP[j].value=0.0;
-																					aic_logP[j].rank=total_permutations;
+																					aic_logP[j].rank=enough_permutations;
 																				}
 																			}
 																		}
@@ -2159,16 +2500,16 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 														}
 														else if(xval_epsilon>0.0){
 															unsigned int i;
-															for(i=0; i<total_permutations; i++){
+															for(i=0; i<enough_permutations; i++){
 																if(aic_logP[i].value==0.0) continue;
 																{
 																	unsigned int j;
-																	for(j=i+1; j<total_permutations; j++){
+																	for(j=i+1; j<enough_permutations; j++){
 																		if(aic_logP[j].subgc==aic_logP[i].subgc && aic_logP[j].supergc==aic_logP[i].supergc && aic_logP[j].gc==aic_logP[i].gc){
 																			if(fabs(aic_logP[i].value-aic_logP[j].value)<xval_epsilon){
 																				if(fabs(aic_logP[i].logdeterminant-aic_logP[j].logdeterminant)<xval_epsilon){
 																					aic_logP[j].value=0.0;
-																					aic_logP[j].rank=total_permutations;
+																					aic_logP[j].rank=enough_permutations;
 																				}
 																			}
 																		}
@@ -2177,11 +2518,11 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 															}
 														}
 														/* Sort again based on index used to generate the result */
-														qsort(aic_logP, (size_t)(total_permutations),sizeof(struct hoods),hoods_by_index);
+														qsort(aic_logP, (size_t)(enough_permutations),sizeof(struct hoods),hoods_by_index);
 														{
 															unsigned int i;
-															for(i=0; i<total_permutations; i++){
-																if(aic_logP[i].rank<total_permutations) working_permutations=i;
+															for(i=0; i<enough_permutations; i++){
+																if(aic_logP[i].rank<enough_permutations) working_permutations=i;
 															}
 														}
 														working_permutations++;
@@ -2277,7 +2618,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 														
 														if(outprefix!=NULL && data_saver!=NULL){
 														
-															if(total_permutations>1 || inf_crit==3){
+															if(enough_permutations>1 || inf_crit==3){
 																/* Rerun ICA for this item since it is not
 																 * guaranteed to be the current working model
 																 */
@@ -2321,7 +2662,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 																{
 																	double dx=1.0;
 																	double eps[2]={1e-4, 1e-8};
-																	unsigned int maxfun=1000;
+																	unsigned int maxfun=MAXFUN;
 																	int stopped=AIR_ucminf(AIR_ica_MLCf15,ica_p*(subgc+supergc),ica_ica_w, &dx, constants, eps, &maxfun, ica_ica_work, ica_p*ica_p*(ica_p*ica_p+13)/2, 1);
 																	if(stopped < 0){
 																		if(subgc+supergc!=0){
@@ -2360,7 +2701,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 							
 											}
 										}
-										if(total_permutations>1 || inf_crit==3){
+										if(enough_permutations>1 || inf_crit==3){
 										
 											/* Must rerun ICA for the globally best model since it is not guaranteed
 											 *  to be the current working model
@@ -2400,7 +2741,7 @@ AIR_Error AIR_ica_sources_aic15(const unsigned int seed, const unsigned int offs
 											{
 												double dx=1.0;
 												double eps[2]={1e-4, 1e-8};
-												unsigned int maxfun=1000;
+												unsigned int maxfun=MAXFUN;
 												int stopped=AIR_ucminf(AIR_ica_MLCf15,ica_p*(subgc+supergc),ica_ica_w, &dx, constants, eps, &maxfun, ica_ica_work, ica_p*ica_p*(ica_p*ica_p+13)/2, 1);
 												if(stopped < 0){
 													if(subgc+supergc!=0){
